@@ -1,60 +1,77 @@
+<<<<<<< HEAD
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 
 import time
+=======
+#!/usr/bin/python3
+import os
+import rclpy
+from rclpy.node import Node
+
+from std_msgs.msg import Header
+from sensor_msgs.msg import Range
+from duckietown_msgs.msg import WheelsCmdStamped
+>>>>>>> 64c964bd6bf9be7da8d7b54201e1d70f1ddfe9f0
 
 
-class ScannerController(Node):
+class scanNode(Node):
     def __init__(self):
-        super().__init__("scanner_controller")
+        super().__init__('scan')
+        self.vehicle_name = os.getenv('VEHICLE_NAME')
+        self.wheels_pub = self.create_publisher(
+            WheelsCmdStamped,
+            f'/{self.vehicle_name}/wheels_cmd',
+            10
+        )
 
-        self.pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        # ===== SCAN PARAMETERS =====
+        self.turn_speed = 0.3
+        self.phase_time = 0.6  # seconds per direction
 
-        # ===== MOTION PARAMETERS (TUNE THESE) =====
-        self.angular_speed = 1.2     # rad/s
-        self.linear_speed = -0.05    # backward
-        self.rotate_time = 1.2       # seconds
-        self.center_time = 1.2
-        self.back_time = 0.6
+        # state
+        self.phase = 0
+        self.last_switch = self.get_clock().now()
 
-        time.sleep(1.0)
-        self.get_logger().info("Scanner Controller started")
+        # timer at 20 Hz
+        self.timer = self.create_timer(0.05, self.scan_step)
 
-        self.scan_loop()
+        self.get_logger().info("Scan node started")
 
-    def send_cmd(self, linear=0.0, angular=0.0, duration=1.0):
-        twist = Twist()
-        twist.linear.x = linear
-        twist.angular.z = angular
+    def run_wheels(self, frame_id, vel_left, vel_right):
+        wheel_msg = WheelsCmdStamped()
+        wheel_msg.header.stamp = self.get_clock().now().to_msg()
+        wheel_msg.header.frame_id = frame_id
+        wheel_msg.vel_left = vel_left
+        wheel_msg.vel_right = vel_right
+        self.wheels_pub.publish(wheel_msg)
 
-        start = time.time()
-        rate_hz = 20
-        period = 1.0 / rate_hz
+    def scan_step(self):
+        now = self.get_clock().now()
+        elapsed = (now - self.last_switch).nanoseconds * 1e-9
 
-        while time.time() - start < duration and rclpy.ok():
-            self.pub.publish(twist)
-            time.sleep(period)
+        if elapsed > self.phase_time:
+            self.phase = (self.phase + 1) % 3
+            self.last_switch = now
 
-        self.stop()
+        # 0 = left, 1 = right, 2 = stop (center)
+        if self.phase == 0:
+            # rotate left
+            self.run_wheels("scan", -self.turn_speed, self.turn_speed)
+        elif self.phase == 1:
+            # rotate right
+            self.run_wheels("scan", self.turn_speed, -self.turn_speed)
+        else:
+            # stop briefly
+            self.run_wheels("scan", 0.0, 0.0)
 
-    def stop(self):
-        self.pub.publish(Twist())
-        time.sleep(0.1)
-
-    def scan_loop(self):
-        # Example motion sequence (adapt as needed)
-        self.send_cmd(angular=self.angular_speed, duration=self.rotate_time)
-        self.send_cmd(duration=self.center_time)
-        self.send_cmd(linear=self.linear_speed, duration=self.back_time)
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = ScannerController()
+def main():
+    rclpy.init()
+    node = scanNode()
+    rclpy.spin(node)
     rclpy.shutdown()
-
 
 if __name__ == "__main__":
     main()
