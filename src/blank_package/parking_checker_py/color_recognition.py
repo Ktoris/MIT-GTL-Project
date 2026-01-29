@@ -1,10 +1,29 @@
-import cv2 as cv
-import numpy as np
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+import cv2
+from .img_rec import detect_color
 
-print("OpenCV:", cv.__version__)
-img = np.zeros((120, 400, 3), dtype=np.uint8)
-cv.putText(img, "OpenCV OK", (10, 80), cv.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3)
-# If you installed a non-headless build, you can display a window:
-# cv.imshow("hello", img); cv.waitKey(0)
-# Always safe (headless or not): save to file
-cv.imwrite("hello.png", img)
+class ColorRecognitionNode(Node):
+    def __init__(self):
+        super().__init__("color_recognition")
+        self.publisher = self.create_publisher(String, "/detected_color", 10)
+        self.timer = self.create_timer(0.5, self.process_image) # Scan 2 times per second
+        self.get_logger().info("Vision Node Scanning...")
+
+    def process_image(self):
+        # In a real robot, use cv2.VideoCapture(0)
+        frame = cv2.imread("test.jpg") 
+        if frame is None:
+            return
+
+        result = detect_color(frame)
+        msg = String()
+        msg.data = result
+        self.publisher.publish(msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = ColorRecognitionNode()
+    rclpy.spin(node)
+    rclpy.shutdown()
