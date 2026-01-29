@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+
+import cv2
+import numpy as np
+
+
+def main():
+    # Open the default camera (0 is usually the built-in webcam)
+    cap = cv2.VideoCapture(0)
+
+    if not cap.isOpened():
+        print("Error: Could not open camera")
+        return
+
+    print("Camera opened successfully!")
+    print("Press 'q' to quit")
+
+    # Define a kernel for cleaning up noise (used in morphology)
+    kernel = np.ones((5, 5), np.uint8)
+
+    while True:
+        # Capture frame
+        ret, frame = cap.read()
+        if not ret:
+            print("Error: Can't receive frame")
+            break
+
+        # Convert to HSV (Hue, Saturation, Value)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # ===== COLOR MASKS =====
+
+        # GREEN mask
+        green_mask = cv2.inRange(hsv, np.array([40, 50, 50]), np.array([80, 255, 255]))
+
+        # RED mask (Handles the wrap-around at 0 and 180)
+        red_mask1 = cv2.inRange(hsv, np.array([0, 120, 100]), np.array([10, 255, 255]))
+        red_mask2 = cv2.inRange(hsv, np.array([170, 120, 100]), np.array([180, 255, 255]))
+        red_mask = red_mask1 | red_mask2
+
+        # BLACK mask (Modified for better real-world detection)
+        # We increase the 'Value' upper bound to 70-80 to catch dark grays/blacks
+        black_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 75]))
+
+        # ===== NOISE REDUCTION (Morphology) =====
+        # This removes small white specks and fills small holes in the detection
+        black_mask = cv2.morphologyEx(black_mask, cv2.MORPH_OPEN, kernel)
+        black_mask = cv2.morphologyEx(black_mask, cv2.MORPH_CLOSE, kernel)
+
+        # ===== PIXEL COUNTING & DETECTION =====
+        PIXEL_THRESHOLD = 5000
+
+        green_pixels = cv2.countNonZero(green_mask)
+        red_pixels = cv2.countNonZero(red_mask)
+        black_pixels = cv2.countNonZero(black_mask)
+
+        # Create a helper function to find and draw objects
+        def draw_objects(mask, color_name, draw_color, frame_img):
+            count = 0
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                if area > 800:  # Minimum size to be considered an "object"
+                    count += 1
+                    x, y, w, h = cv2.boundingRect(contour)
+                    # Draw rectangle and labels
+                    cv2.rectangle(frame_img, (x, y), (x + w, y + h), draw_color, 2)
+                    cv2.putText(frame_img, f"{color_name} #{count}", (x, y - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, draw_color, 2)
+                    cv2.putText(frame_img, f"Area: {int(area)}", (x, y + h + 20),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, draw_color, 1)
+            return count
+
+        # Process and draw for each color
+        # Note: (B, G, R) format for colors
+        black_count = draw_objects(black_mask, "BLACK", (255, 255, 255), frame)
+        green_count = draw_objects(green_mask, "GREEN", (0, 255, 0), frame)
+        red_count = draw_objects(red_mask, "RED", (0, 0, 255), frame)
+
+        # ===== HUD / OVERLAY =====
+        status_y = 30
+        cv2.putText(frame, f"Black Pixels: {black_pixels}", (10, status_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        # Show detection status
+        if black_count > 0 or green_count > 0 or red_count > 0:
+            msg = f"Detecting: {black_count} Black, {green_count} Green, {red_count} Red"
+        else:
+            msg = "Searching..."
+
+        cv2.putText(frame, msg, (10, frame.shape[0] - 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+
+        # Show windows
+        cv2.imshow('Main Feed', frame)
+        cv2.imshow('Black Mask (Debug)', black_mask)
+
+        # Press 'q' to quit
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    main()
