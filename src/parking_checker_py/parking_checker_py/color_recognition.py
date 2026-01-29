@@ -63,39 +63,103 @@ class ScanWithObjectDetection(Node):
             return
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        kernel = np.ones((5, 5), np.uint8)
 
-        # GREEN mask
-        green_mask = cv2.inRange(hsv, np.array([40,50,50]), np.array([80,255,255]))
-        # RED mask (wrap around hue)
-        red_mask1 = cv2.inRange(hsv, np.array([0,70,50]), np.array([10,255,255]))
-        red_mask2 = cv2.inRange(hsv, np.array([170,70,50]), np.array([180,255,255]))
-        red_mask = red_mask1 | red_mask2
+        # ===== MASKS =====
 
-        PIXEL_THRESHOLD = 3000
+        # ===== GREEN MASK =====
+        green_mask = cv2.inRange(
+            hsv,
+            np.array([40, 50, 50]),
+            np.array([80, 255, 255])
+        )
+
         green_pixels = cv2.countNonZero(green_mask)
-        red_pixels = cv2.countNonZero(red_mask)
+        GREEN_PIXEL_THRESHOLD = 4000
 
-        if green_pixels > PIXEL_THRESHOLD:
+        # Red (wraparound)
+        r_low1 = np.array([0, 120, 100])
+        r_high1 = np.array([10, 255, 255])
+        r_low2 = np.array([170, 120, 100])
+        r_high2 = np.array([180, 255, 255])
+        red_mask = (
+                cv2.inRange(hsv, r_low1, r_high1) |
+                cv2.inRange(hsv, r_low2, r_high2)
+        )
+
+        # Black
+        black_mask = cv2.inRange(
+            hsv, np.array([0, 0, 0]), np.array([180, 255, 75])
+        )
+        black_mask = cv2.morphologyEx(black_mask, cv2.MORPH_OPEN, kernel)
+
+        # ===== FIND OBJECTS =====
+        red_objs = []
+        black_objs = []
+
+        contours_r, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in contours_r:
+            if cv2.contourArea(c) > 1000:
+                x, y, w, h = cv2.boundingRect(c)
+                red_objs.append((x, y, w, h, x + w // 2, y + h // 2))
+
+        contours_b, _ = cv2.findContours(black_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in contours_b:
+            if cv2.contourArea(c) > 1000:
+                x, y, w, h = cv2.boundingRect(c)
+                black_objs.append((x, y, w, h, x + w // 2, y + h // 2))
+
+        # ===== UPDATE COLOR STATE =====
+        if green_pixels > GREEN_PIXEL_THRESHOLD:
             self.color_detected = 'green'
-        elif red_pixels > PIXEL_THRESHOLD:
+        elif red_objs:
             self.color_detected = 'red'
+        elif black_objs:
+            self.color_detected = 'black'
         else:
             self.color_detected = None
 
-        # Simple object detection: check red contours
+        # ===== RED–BLACK–RED SANDWICH DETECTION =====
         self.object_detected = False
-        if self.color_detected == 'red':
-            contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for c in contours:
-                if cv2.contourArea(c) > 5000:  # large enough to be an object
-                    self.object_detected = True
-                    break
 
-        self.get_logger().info(f"Color: {self.color_detected}, Object: {self.object_detected}")
+        for b in black_objs:
+            bx, by = b[4], b[5]
+
+            for i in range(len(red_objs)):
+                for j in range(i + 1, len(red_objs)):
+                    r1x, r1y = red_objs[i][4], red_objs[i][5]
+                    r2x, r2y = red_objs[j][4], red_objs[j][5]
+
+                    horiz = (
+                            min(r1x, r2x) < bx < max(r1x, r2x)
+                            and abs(r1y - r2y) < 100
+                    )
+
+                    vert = (
+                            min(r1y, r2y) < by < max(r1y, r2y)
+                            and abs(r1x - r2x) < 100
+                    )
+
+                    if horiz or vert:
+                        self.object_detected = True
+                        break
+                if self.object_detected:
+                    break
+            if self.object_detected:
+                break
+
+        self.get_logger().info(
+            f"Color: {self.color_detected}, Object: {self.object_detected}"
+        )
 
     # ---------- MOVEMENT ----------
     def movement_step(self):
-        # Always scan, do not move toward color/object yet
+        # MOVE FORWARD ONLY IF RED + OBJECT
+        if self.color_detected == 'red' and self.object_detected:
+            self.run_wheels("forward", 0.4, 0.4)
+            return
+
+        # OTHERWISE: KEEP SCANNING
         now = self.get_clock().now()
         elapsed = (now - self.last_switch).nanoseconds * 1e-9
         if elapsed > self.phase_time:
@@ -103,13 +167,10 @@ class ScanWithObjectDetection(Node):
             self.last_switch = now
 
         if self.phase == 0:
-            # rotate left
             self.run_wheels("scan", -self.turn_speed, self.turn_speed)
         elif self.phase == 1:
-            # rotate right
             self.run_wheels("scan", self.turn_speed, -self.turn_speed)
         else:
-            # stop briefly
             self.run_wheels("scan", 0.0, 0.0)
 
 
