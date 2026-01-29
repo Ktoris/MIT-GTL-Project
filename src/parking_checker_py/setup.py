@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'parking_checker'
+package_name = 'parking_checker_py'
 
 setup(
     name=package_name,
