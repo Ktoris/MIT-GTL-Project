@@ -58,11 +58,11 @@ class scanNode(Node):
             # stop briefly
             self.run_wheels("scan", 0.0, 0.0)
 
-    def main():
-        rclpy.init()
-        node = scanNode()
-        rclpy.spin(node)
-        rclpy.shutdown()
+def main():
+    rclpy.init()
+    node = scanNode()
+    rclpy.spin(node)
+    rclpy.shutdown()
 
 if __name__ == "__main__":
     main()
