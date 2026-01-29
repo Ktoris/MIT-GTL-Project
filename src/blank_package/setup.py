@@ -11,10 +11,14 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
 <<<<<<< HEAD
+<<<<<<< HEAD
         ('lib/'+package_name,['blank_package/basic_movement.py']) #we added this line, add another if more nodes
 =======
         ('lib/'+package_name,['blank_package/blank_node.py', 'parking_checker_py/color_recognition.py']) #we added this line, add another if more nodes
 >>>>>>> e82d3e8ca43f4e7c9cf1d1f38efa6d66c646e0bb
+=======
+        ('lib/'+package_name,['blank_package/blank_node.py']) #we added this line, add another if more nodes
+>>>>>>> c643c8693c5b9bc808bf795514f70a27f6d336d6
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -33,8 +37,11 @@ setup(
             'basic_movement = blank_package.basic_movement:main'
 =======
             'blank_node = blank_package.blank_node:main',
+<<<<<<< HEAD
             'color_recognition = parking_checker_py.color_recognition:main'
 >>>>>>> e82d3e8ca43f4e7c9cf1d1f38efa6d66c646e0bb
+=======
+>>>>>>> c643c8693c5b9bc808bf795514f70a27f6d336d6
         ],
     },
 )
