@@ -8,9 +8,9 @@ from duckietown_msgs.msg import WheelsCmdStamped
 import cv2
 import numpy as np
 
-class ScanAndFollow(Node):
+class ScanWithObjectDetection(Node):
     def __init__(self):
-        super().__init__('scan_and_follow')
+        super().__init__('scan_object_detection')
 
         self.vehicle_name = os.getenv('VEHICLE_NAME', 'duckiebot')
 
@@ -35,13 +35,14 @@ class ScanAndFollow(Node):
         self.phase = 0
         self.last_switch = self.get_clock().now()
 
-        # ===== COLOR DETECTION STATE =====
-        self.target_detected = None  # 'red', 'green', or None
+        # ===== COLOR & OBJECT DETECTION STATE =====
+        self.color_detected = None      # 'red', 'green', or None
+        self.object_detected = False
 
         # Timer for movement
         self.timer = self.create_timer(0.05, self.movement_step)
 
-        self.get_logger().info("Scan + Follow node started")
+        self.get_logger().info("Scan + Object Detection node started")
 
     # ---------- WHEELS ----------
     def run_wheels(self, frame_id, vel_left, vel_right):
@@ -52,12 +53,13 @@ class ScanAndFollow(Node):
         msg.vel_right = vel_right
         self.wheels_pub.publish(msg)
 
-    # ---------- COLOR DETECTION ----------
+    # ---------- COLOR & OBJECT DETECTION ----------
     def image_callback(self, msg):
         np_arr = np.frombuffer(msg.data, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         if frame is None:
-            self.target_detected = None
+            self.color_detected = None
+            self.object_detected = False
             return
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -74,23 +76,26 @@ class ScanAndFollow(Node):
         red_pixels = cv2.countNonZero(red_mask)
 
         if green_pixels > PIXEL_THRESHOLD:
-            self.target_detected = 'green'
-            self.get_logger().info("GREEN detected")
+            self.color_detected = 'green'
         elif red_pixels > PIXEL_THRESHOLD:
-            self.target_detected = 'red'
-            self.get_logger().info("RED detected")
+            self.color_detected = 'red'
         else:
-            self.target_detected = None
+            self.color_detected = None
+
+        # Simple object detection: check red contours
+        self.object_detected = False
+        if self.color_detected == 'red':
+            contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for c in contours:
+                if cv2.contourArea(c) > 5000:  # large enough to be an object
+                    self.object_detected = True
+                    break
+
+        self.get_logger().info(f"Color: {self.color_detected}, Object: {self.object_detected}")
 
     # ---------- MOVEMENT ----------
     def movement_step(self):
-        # If color detected → move forward
-        if self.target_detected is not None:
-            # simple forward speed
-            self.run_wheels("follow", 0.2, 0.2)
-            return
-
-        # Otherwise, do scanning pattern
+        # Always scan, do not move toward color/object yet
         now = self.get_clock().now()
         elapsed = (now - self.last_switch).nanoseconds * 1e-9
         if elapsed > self.phase_time:
@@ -110,7 +115,7 @@ class ScanAndFollow(Node):
 
 def main():
     rclpy.init()
-    node = ScanAndFollow()
+    node = ScanWithObjectDetection()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
